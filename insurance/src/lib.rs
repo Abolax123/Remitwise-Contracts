@@ -227,7 +227,6 @@ impl Insurance {
     }
     pub fn pause(env: Env, caller: Address) -> Result<(), InsuranceError> {
         caller.require_auth();
-        let admin = Self::get_pause_admin(&env).unwrap_or_else(|| panic!("No pause admin set"));
         let admin = Self::get_pause_admin(&env).ok_or(InsuranceError::Unauthorized)?;
         if admin != caller {
             return Err(InsuranceError::Unauthorized);
@@ -241,7 +240,6 @@ impl Insurance {
     }
     pub fn unpause(env: Env, caller: Address) -> Result<(), InsuranceError> {
         caller.require_auth();
-        let admin = Self::get_pause_admin(&env).unwrap_or_else(|| panic!("No pause admin set"));
         let admin = Self::get_pause_admin(&env).ok_or(InsuranceError::Unauthorized)?;
         if admin != caller {
             return Err(InsuranceError::Unauthorized);
@@ -790,7 +788,6 @@ impl Insurance {
             .get(&symbol_short!("POLICIES"))
             .unwrap_or_else(|| Map::new(&env));
 
-        let mut policy = policies.get(policy_id).unwrap_or_else(|| panic!("Policy not found"));
         let mut policy = policies
             .get(policy_id)
             .ok_or(InsuranceError::PolicyNotFound)?;
@@ -801,7 +798,7 @@ impl Insurance {
 
         let was_active = policy.active;
         policy.active = false;
-        let policy_external_ref = policy.external_ref.clone();
+        let _policy_external_ref = policy.external_ref.clone();
         let premium_amount = policy.monthly_premium;
         policies.set(policy_id, policy.clone());
         env.storage()
@@ -865,7 +862,7 @@ impl Insurance {
             (policy_id, caller, external_ref),
         );
 
-        Ok(true)
+        true
     }
 
     /// Extend the TTL of instance storage
@@ -1008,7 +1005,6 @@ impl Insurance {
             .get(&symbol_short!("PREM_SCH"))
             .unwrap_or_else(|| Map::new(&env));
 
-        let mut schedule = schedules.get(schedule_id).unwrap_or_else(|| panic!("Schedule not found"));
         let mut schedule = schedules
             .get(schedule_id)
             .ok_or(InsuranceError::PolicyNotFound)?;
@@ -1051,7 +1047,6 @@ impl Insurance {
             .get(&symbol_short!("PREM_SCH"))
             .unwrap_or_else(|| Map::new(&env));
 
-        let mut schedule = schedules.get(schedule_id).unwrap_or_else(|| panic!("Schedule not found"));
         let mut schedule = schedules
             .get(schedule_id)
             .ok_or(InsuranceError::PolicyNotFound)?;
