@@ -1,4 +1,4 @@
-use testutils::{set_ledger_time};
+use testutils::set_ledger_time;
 
 // Mock contracts for testing
 mod remittance_split {

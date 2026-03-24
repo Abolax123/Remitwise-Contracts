@@ -51,7 +51,7 @@ jobs:
               echo "Installed via Homebrew"
             else
               echo "Homebrew install failed, installing via cargo..."
-              cargo install --locked --version 21.0.0 soroban-cli
+              cargo install --locked --version 21.1.0 soroban-cli
             fi
           fi
           # Try both commands in case Homebrew installs it as 'stellar'

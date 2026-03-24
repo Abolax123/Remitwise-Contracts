@@ -266,7 +266,7 @@ fn test_multiple_entities_creation() {
 /// to the shared `RemitwiseEvents` helper.
 #[test]
 fn test_event_topic_compliance_across_contracts() {
-    use soroban_sdk::{symbol_short, Vec, IntoVal};
+    use soroban_sdk::{symbol_short, IntoVal, Vec};
 
     let env = Env::default();
     env.mock_all_auths();
@@ -290,7 +290,12 @@ fn test_event_topic_compliance_across_contracts() {
     remittance_client.initialize_split(&user, &0u64, &40u32, &30u32, &20u32, &10u32);
 
     let goal_name = SorobanString::from_str(&env, "Compliance Goal");
-    let _ = savings_client.create_goal(&user, &goal_name, &1000i128, &(env.ledger().timestamp() + 86400));
+    let _ = savings_client.create_goal(
+        &user,
+        &goal_name,
+        &1000i128,
+        &(env.ledger().timestamp() + 86400),
+    );
 
     let bill_name = SorobanString::from_str(&env, "Compliance Bill");
     let _ = bills_client.create_bill(
@@ -309,7 +314,10 @@ fn test_event_topic_compliance_across_contracts() {
 
     // Collect published events
     let events = env.events().all();
-    assert!(events.len() > 0, "No events were emitted by the sample actions");
+    assert!(
+        events.len() > 0,
+        "No events were emitted by the sample actions"
+    );
 
     // Validate each event's topics conform to Remitwise schema
     let mut non_compliant = Vec::new(&env);
@@ -317,7 +325,8 @@ fn test_event_topic_compliance_across_contracts() {
     for ev in events.iter() {
         let topics = &ev.1;
         // Expect topics to be a vector of length 4 starting with symbol_short!("Remitwise")
-        let ok = topics.len() == 4 && topics.get(0).unwrap() == symbol_short!("Remitwise").into_val(&env);
+        let ok = topics.len() == 4
+            && topics.get(0).unwrap() == symbol_short!("Remitwise").into_val(&env);
         if !ok {
             non_compliant.push_back(ev.clone());
         }

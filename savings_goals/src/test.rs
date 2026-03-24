@@ -95,7 +95,11 @@ fn test_init_idempotent_does_not_wipe_goals() {
     assert_eq!(goal_after_second_init.current_amount, 0);
 
     let all_goals = client.get_all_goals(&owner_a);
-    assert_eq!(all_goals.len(), 1, "get_all_goals must still return the one goal");
+    assert_eq!(
+        all_goals.len(),
+        1,
+        "get_all_goals must still return the one goal"
+    );
 
     // Verify NEXT_ID was not reset: next created goal must get goal_id == 2, not 1
     let name2 = String::from_str(&env, "Second Goal");
@@ -1819,9 +1823,18 @@ fn test_get_all_goals_filters_by_owner() {
 
     // Verify goal IDs for owner_a are correct
     let goal_a_ids: Vec<u32> = goals_a.iter().map(|g| g.id).collect();
-    assert!(goal_a_ids.contains(&goal_a1), "Goals for A should contain goal_a1");
-    assert!(goal_a_ids.contains(&goal_a2), "Goals for A should contain goal_a2");
-    assert!(goal_a_ids.contains(&goal_a3), "Goals for A should contain goal_a3");
+    assert!(
+        goal_a_ids.contains(&goal_a1),
+        "Goals for A should contain goal_a1"
+    );
+    assert!(
+        goal_a_ids.contains(&goal_a2),
+        "Goals for A should contain goal_a2"
+    );
+    assert!(
+        goal_a_ids.contains(&goal_a3),
+        "Goals for A should contain goal_a3"
+    );
 
     // Get all goals for owner_b
     let goals_b = client.get_all_goals(&owner_b);
@@ -1838,8 +1851,14 @@ fn test_get_all_goals_filters_by_owner() {
 
     // Verify goal IDs for owner_b are correct
     let goal_b_ids: Vec<u32> = goals_b.iter().map(|g| g.id).collect();
-    assert!(goal_b_ids.contains(&goal_b1), "Goals for B should contain goal_b1");
-    assert!(goal_b_ids.contains(&goal_b2), "Goals for B should contain goal_b2");
+    assert!(
+        goal_b_ids.contains(&goal_b1),
+        "Goals for B should contain goal_b1"
+    );
+    assert!(
+        goal_b_ids.contains(&goal_b2),
+        "Goals for B should contain goal_b2"
+    );
 
     // Verify that goal IDs between owner_a and owner_b are disjoint
     for goal_a_id in &goal_a_ids {

@@ -88,7 +88,7 @@ pub struct SavingsSchedule {
 }
 
 #[contracttype]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum SavingsGoalsError {
     InvalidAmount = 1,
     GoalNotFound = 2,
@@ -296,7 +296,9 @@ impl SavingsGoalContract {
 
     pub fn pause(env: Env, caller: Address) {
         caller.require_auth();
-        let admin = Self::get_pause_admin(&env).ok_or(SavingsGoalsError::Unauthorized).unwrap();
+        let admin = Self::get_pause_admin(&env)
+            .ok_or(SavingsGoalsError::Unauthorized)
+            .unwrap();
         if admin != caller {
             panic!("Unauthorized");
         }
@@ -309,7 +311,9 @@ impl SavingsGoalContract {
 
     pub fn unpause(env: Env, caller: Address) {
         caller.require_auth();
-        let admin = Self::get_pause_admin(&env).ok_or(SavingsGoalsError::Unauthorized).unwrap();
+        let admin = Self::get_pause_admin(&env)
+            .ok_or(SavingsGoalsError::Unauthorized)
+            .unwrap();
         if admin != caller {
             panic!("Unauthorized");
         }
@@ -329,7 +333,9 @@ impl SavingsGoalContract {
 
     pub fn pause_function(env: Env, caller: Address, func: Symbol) {
         caller.require_auth();
-        let admin = Self::get_pause_admin(&env).ok_or(SavingsGoalsError::Unauthorized).unwrap();
+        let admin = Self::get_pause_admin(&env)
+            .ok_or(SavingsGoalsError::Unauthorized)
+            .unwrap();
         if admin != caller {
             panic!("Unauthorized");
         }
@@ -346,7 +352,9 @@ impl SavingsGoalContract {
 
     pub fn unpause_function(env: Env, caller: Address, func: Symbol) {
         caller.require_auth();
-        let admin = Self::get_pause_admin(&env).ok_or(SavingsGoalsError::Unauthorized).unwrap();
+        let admin = Self::get_pause_admin(&env)
+            .ok_or(SavingsGoalsError::Unauthorized)
+            .unwrap();
         if admin != caller {
             panic!("Unauthorized");
         }
@@ -427,12 +435,7 @@ impl SavingsGoalContract {
         }
     }
 
-    pub fn add_tags_to_goal(
-        env: Env,
-        caller: Address,
-        goal_id: u32,
-        tags: Vec<String>,
-    ) {
+    pub fn add_tags_to_goal(env: Env, caller: Address, goal_id: u32, tags: Vec<String>) {
         caller.require_auth();
         Self::validate_tags(&tags);
         Self::extend_instance_ttl(&env);
@@ -467,12 +470,7 @@ impl SavingsGoalContract {
         Self::append_audit(&env, symbol_short!("add_tags"), &caller, true);
     }
 
-    pub fn remove_tags_from_goal(
-        env: Env,
-        caller: Address,
-        goal_id: u32,
-        tags: Vec<String>,
-    ) {
+    pub fn remove_tags_from_goal(env: Env, caller: Address, goal_id: u32, tags: Vec<String>) {
         caller.require_auth();
         Self::validate_tags(&tags);
         Self::extend_instance_ttl(&env);
@@ -740,12 +738,10 @@ impl SavingsGoalContract {
             if goal.owner != caller {
                 panic!("Batch validation failed");
             }
-            goal.current_amount = match goal
-                .current_amount
-                .checked_add(item.amount) {
-                    Some(v) => v,
-                    None => panic!("overflow"),
-                };
+            goal.current_amount = match goal.current_amount.checked_add(item.amount) {
+                Some(v) => v,
+                None => panic!("overflow"),
+            };
             let new_total = goal.current_amount;
             let was_completed = new_total >= goal.target_amount;
             let previously_completed = (new_total - item.amount) >= goal.target_amount;
@@ -1033,7 +1029,9 @@ impl SavingsGoalContract {
 
         let mut result = Vec::new(&env);
         for i in start_index..end_index {
-            let goal_id = ids.get(i).unwrap_or_else(|| panic!("Pagination index out of sync"));
+            let goal_id = ids
+                .get(i)
+                .unwrap_or_else(|| panic!("Pagination index out of sync"));
             let goal = goals
                 .get(goal_id)
                 .unwrap_or_else(|| panic!("Pagination index out of sync"));
@@ -1506,12 +1504,10 @@ impl SavingsGoalContract {
             }
 
             if let Some(mut goal) = goals.get(schedule.goal_id) {
-                goal.current_amount = match goal
-                    .current_amount
-                    .checked_add(schedule.amount) {
-                        Some(v) => v,
-                        None => panic!("overflow"),
-                    };
+                goal.current_amount = match goal.current_amount.checked_add(schedule.amount) {
+                    Some(v) => v,
+                    None => panic!("overflow"),
+                };
 
                 let is_completed = goal.current_amount >= goal.target_amount;
                 goals.set(schedule.goal_id, goal.clone());
