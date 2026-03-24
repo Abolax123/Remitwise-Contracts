@@ -18,7 +18,7 @@ members = [
     "scenarios",
     "remitwise-common",
     "testutils",
-
+    "emergency_killswitch",
     "integration_tests",
 ]
 default-members = [
@@ -30,7 +30,7 @@ default-members = [
     "data_migration",
     "reporting",
     "orchestrator",
-
+    "emergency_killswitch",
 ]
 resolver = "2"
 

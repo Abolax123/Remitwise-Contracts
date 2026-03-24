@@ -89,9 +89,11 @@ fn test_read_only_works_while_paused() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_unpause_restores_operations() {
-    let (_, client, admin) = setup();
+    let (env, client, admin) = setup();
 
     client.pause(&admin);
+    client.mark_resolved(&admin);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
     client.unpause(&admin);
 
     assert!(!client.is_paused(), "contract should be unpaused");
@@ -155,12 +157,13 @@ fn test_schedule_unpause_enforced() {
     let result = client.try_unpause(&admin);
     assert_eq!(
         result,
-        Err(Ok(emergency_killswitch::Error::ContractPaused)),
-        "unpause before scheduled time must be rejected"
+        Err(Ok(emergency_killswitch::Error::UnderCooldown)),
+        "unpause before scheduled time must be rejected (hit cooldown first)"
     );
 
     // Advance ledger past the scheduled time and retry.
     env.ledger().set_timestamp(future + 1);
+    client.mark_resolved(&admin);
     client.unpause(&admin); // must succeed
     assert!(!client.is_paused());
 }
@@ -179,7 +182,9 @@ fn test_transfer_admin() {
     client.pause(&new_admin);
     assert!(client.is_paused());
 
-    // Old admin can no longer pause after transferring rights.
+    // New admin can unpause (after cooldown/resolution)
+    client.mark_resolved(&new_admin);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
     client.unpause(&new_admin);
     let result = client.try_pause(&old_admin);
     assert_eq!(
@@ -212,4 +217,92 @@ fn test_emergency_pause_emits_event() {
     use soroban_sdk::symbol_short;
     assert_eq!(ns, symbol_short!("killswtch"));
     assert_eq!(action, symbol_short!("paused"));
+}
+
+// ---------------------------------------------------------------------------
+// 10. Cooldown and Resolution Safety Checks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_unpause_fails_during_cooldown() {
+    let (env, client, admin) = setup();
+
+    client.pause(&admin);
+    client.mark_resolved(&admin);
+
+    // Attempt to unpause immediately (during cooldown)
+    let result = client.try_unpause(&admin);
+    assert_eq!(
+        result,
+        Err(Ok(emergency_killswitch::Error::UnderCooldown)),
+        "unpause must fail if MIN_COOLDOWN hasn't elapsed"
+    );
+
+    // Advance ledger by 3601 seconds
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    client.unpause(&admin); // should succeed now
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn test_unpause_fails_if_not_resolved() {
+    let (env, client, admin) = setup();
+
+    client.pause(&admin);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+    // Attempt to unpause without marking as resolved
+    let result = client.try_unpause(&admin);
+    assert_eq!(
+        result,
+        Err(Ok(emergency_killswitch::Error::NotResolved)),
+        "unpause must fail if not explicitly marked as resolved"
+    );
+
+    client.mark_resolved(&admin);
+    client.unpause(&admin); // should succeed now
+}
+
+#[test]
+fn test_pause_resets_resolved_flag() {
+    let (env, client, admin) = setup();
+
+    client.pause(&admin);
+    client.mark_resolved(&admin);
+    
+    // Cycle: Unpause
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    client.unpause(&admin);
+
+    // Pause again
+    client.pause(&admin);
+
+    // Attempt to unpause immediately after second pause (cooldown + resolution check again)
+    let result = client.try_unpause(&admin);
+    assert_eq!(
+        result,
+        Err(Ok(emergency_killswitch::Error::UnderCooldown)),
+        "new pause must reset cooldown"
+    );
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    let result2 = client.try_unpause(&admin);
+    assert_eq!(
+        result2,
+        Err(Ok(emergency_killswitch::Error::NotResolved)),
+        "new pause must reset resolution flag"
+    );
+}
+
+#[test]
+fn test_mark_resolved_requires_admin() {
+    let (env, client, _admin) = setup();
+    let rando = Address::generate(&env);
+
+    let result = client.try_mark_resolved(&rando);
+    assert_eq!(
+        result,
+        Err(Ok(emergency_killswitch::Error::Unauthorized)),
+        "non-admin cannot mark as resolved"
+    );
 }

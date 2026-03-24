@@ -9,6 +9,10 @@ use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, 
 const KEY_ADMIN: Symbol = symbol_short!("ADMIN");
 const KEY_PAUSED: Symbol = symbol_short!("PAUSED");
 const KEY_UNP_AT: Symbol = symbol_short!("UNP_AT");
+const KEY_LAST_PAUSE: Symbol = symbol_short!("LST_PAU");
+const KEY_RESOLVED: Symbol = symbol_short!("RESOLVED");
+
+const MIN_COOLDOWN: u64 = 3600; // 1 hour in seconds
 
 // ---------------------------------------------------------------------------
 // Error codes
@@ -28,6 +32,10 @@ pub enum Error {
     ContractPaused = 4,
     /// Scheduled-unpause timestamp must be in the future.
     InvalidSchedule = 5,
+    /// Minimum cooldown period has not yet elapsed.
+    UnderCooldown = 6,
+    /// The emergency state has not been marked as resolved.
+    NotResolved = 7,
 }
 
 // ---------------------------------------------------------------------------
@@ -107,19 +115,47 @@ impl EmergencyKillswitch {
         caller.require_auth();
         Self::check_admin(&env, &caller)?;
         env.storage().instance().set(&KEY_PAUSED, &true);
+        env.storage()
+            .instance()
+            .set(&KEY_LAST_PAUSE, &env.ledger().timestamp());
+        env.storage().instance().set(&KEY_RESOLVED, &false);
         emit(&env, symbol_short!("paused"));
         Ok(())
     }
 
+    /// Mark the underlying emergency as resolved. This is a prerequisite for unpausing.
+    /// Only the admin may call this.
+    pub fn mark_resolved(env: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+        Self::check_admin(&env, &caller)?;
+        env.storage().instance().set(&KEY_RESOLVED, &true);
+        emit(&env, symbol_short!("resolved"));
+        Ok(())
+    }
+
     /// Unpause the contract. Only the admin may call this.
-    /// If a scheduled-unpause timestamp has been set, the current ledger time
-    /// must be ≥ that timestamp, otherwise returns `ContractPaused`.
-    /// Emits an `"unpaused"` event.
+    ///
+    /// Safety Checks:
+    /// 1. Minimum cooldown (`MIN_COOLDOWN`) must have elapsed since the last pause.
+    /// 2. The incident must be explicitly marked as `resolved`.
+    /// 3. Any manually scheduled delay (`schedule_unpause`) must have passed.
     pub fn unpause(env: Env, caller: Address) -> Result<(), Error> {
         caller.require_auth();
         Self::check_admin(&env, &caller)?;
 
-        // Honour any scheduled delay.
+        // 1. Mandatory Cooldown Check
+        let last_pause: u64 = env.storage().instance().get(&KEY_LAST_PAUSE).unwrap_or(0);
+        if env.ledger().timestamp() < last_pause + MIN_COOLDOWN {
+            return Err(Error::UnderCooldown);
+        }
+
+        // 2. Resolution Check
+        let resolved: bool = env.storage().instance().get(&KEY_RESOLVED).unwrap_or(false);
+        if !resolved {
+            return Err(Error::NotResolved);
+        }
+
+        // 3. Manual Schedule Check
         let unp_at: Option<u64> = env.storage().instance().get(&KEY_UNP_AT);
         if let Some(at) = unp_at {
             if env.ledger().timestamp() < at {
@@ -129,6 +165,8 @@ impl EmergencyKillswitch {
         }
 
         env.storage().instance().set(&KEY_PAUSED, &false);
+        env.storage().instance().remove(&KEY_RESOLVED);
+        env.storage().instance().remove(&KEY_LAST_PAUSE);
         emit(&env, symbol_short!("unpaused"));
         Ok(())
     }
