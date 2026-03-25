@@ -1854,7 +1854,8 @@ mod test_events {
     // Assumptions:
     //  - execute_due_premium_schedules fires when schedule.next_due <= current_time
     //    (inclusive: executes exactly at next_due).
-    //  - next_payment_date = env.ledger().timestamp() + 30 * 86400 at execution,
+
+  //  - next_payment_date = env.ledger().timestamp() + 30 * 86400 at execution,
     //    anchored to actual payment time, not original next_due.
     //  - Stellar ledger timestamps are monotonically increasing in production.
     //    After execution next_due advances by the interval, guarding re-runs.
