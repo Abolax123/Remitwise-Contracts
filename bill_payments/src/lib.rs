@@ -77,8 +77,9 @@ pub enum Error {
     BatchValidationFailed = 10,
     InvalidLimit = 11,
     InvalidDueDate = 12,
-    InvalidTag = 12,
-    EmptyTags = 13,
+    InvalidTag = 13,
+    EmptyTags = 14,
+    InvalidCurrency = 15,
 }
 
 #[derive(Clone)]
@@ -150,6 +151,66 @@ impl BillPayments {
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
+
+    /// Normalize a currency string for consistent storage and comparison.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `currency` - Currency code string to normalize
+    ///
+    /// # Returns
+    /// Normalized currency string with:
+    /// 1. Whitespace trimmed from both ends
+    /// 2. Converted to uppercase
+    /// 3. Empty strings default to "XLM"
+    ///
+    /// # Examples
+    /// - "usdc" → "USDC"
+    /// - " XLM " → "XLM"
+    /// - "" → "XLM"
+    /// - "UsDc" → "USDC"
+    fn normalize_currency(env: &Env, currency: &String) -> String {
+        let trimmed = currency.trim();
+        if trimmed.is_empty() {
+            String::from_str(env, "XLM")
+        } else {
+            String::from_str(env, &trimmed.to_uppercase())
+        }
+    }
+
+    /// Validate a currency string according to contract requirements.
+    ///
+    /// # Arguments
+    /// * `currency` - Currency code string to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the currency is valid
+    /// * `Err(Error::InvalidCurrency)` if invalid
+    ///
+    /// # Validation Rules
+    /// 1. Length must be 1-12 characters (after trimming)
+    /// 2. Must contain only alphanumeric characters (A-Z, a-z, 0-9)
+    /// 3. Empty strings are allowed (will be normalized to "XLM")
+    ///
+    /// # Examples
+    /// - Valid: "XLM", "USDC", "NGN", "EUR123"
+    /// - Invalid: "USD$", "BTC-ETH", "XLM/USD", "ABCDEFGHIJKLM" (too long)
+    fn validate_currency(currency: &String) -> Result<(), Error> {
+        let s = currency.trim();
+        if s.is_empty() {
+            return Ok(()); // Will be normalized to "XLM"
+        }
+        if s.len() > 12 {
+            return Err(Error::InvalidCurrency);
+        }
+        // Check if all characters are alphanumeric (A-Z, a-z, 0-9)
+        for ch in s.chars() {
+            if !ch.is_ascii_alphanumeric() {
+                return Err(Error::InvalidCurrency);
+            }
+        }
+        Ok(())
+    }
 
     fn get_pause_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&symbol_short!("PAUSE_ADM"))
@@ -416,6 +477,34 @@ impl BillPayments {
     // Core bill operations
     // -----------------------------------------------------------------------
 
+    /// Create a new bill with currency specification.
+    ///
+    /// # Arguments
+    /// * `owner` - Address of the bill owner (must authorize)
+    /// * `name` - Name of the bill (e.g., "Electricity", "School Fees")
+    /// * `amount` - Amount to pay (must be positive)
+    /// * `due_date` - Due date as Unix timestamp (must be in the future)
+    /// * `recurring` - Whether this is a recurring bill
+    /// * `frequency_days` - Frequency in days for recurring bills (must be > 0 if recurring)
+    /// * `external_ref` - Optional external system reference ID
+    /// * `currency` - Currency code (e.g., "XLM", "USDC", "NGN"). Case-insensitive, whitespace trimmed.
+    ///
+    /// # Returns
+    /// The ID of the created bill
+    ///
+    /// # Errors
+    /// * `InvalidAmount` - If amount is zero or negative
+    /// * `InvalidFrequency` - If recurring is true but frequency_days is 0
+    /// * `InvalidDueDate` - If due_date is 0 or in the past
+    /// * `InvalidCurrency` - If currency code is invalid (non-alphanumeric or wrong length)
+    /// * `ContractPaused` - If contract is globally paused
+    /// * `FunctionPaused` - If create_bill function is paused
+    ///
+    /// # Currency Normalization
+    /// - Converts to uppercase (e.g., "usdc" → "USDC")
+    /// - Trims whitespace (e.g., " XLM " → "XLM")
+    /// - Empty string defaults to "XLM"
+    /// - Validates: 1-12 alphanumeric characters only
     #[allow(clippy::too_many_arguments)]
     pub fn create_bill(
         env: Env,
@@ -443,12 +532,9 @@ impl BillPayments {
             return Err(Error::InvalidFrequency);
         }
 
-        // Resolve default currency: blank input → "XLM"
-        let resolved_currency = if currency.is_empty() {
-            String::from_str(&env, "XLM")
-        } else {
-            currency
-        };
+        // Validate and normalize currency
+        Self::validate_currency(&currency)?;
+        let resolved_currency = Self::normalize_currency(&env, &currency);
 
         Self::extend_instance_ttl(&env);
         let mut bills: Map<u32, Bill> = env
@@ -1238,13 +1324,24 @@ impl BillPayments {
     /// Get a page of ALL bills (paid + unpaid) for `owner` that match `currency`.
     ///
     /// # Arguments
-    /// * `owner`    – whose bills to return
-    /// * `currency` – currency code to filter by, e.g. `"USDC"`, `"XLM"`
-    /// * `cursor`   – start after this bill ID (pass 0 for the first page)
-    /// * `limit`    – max items per page (0 → DEFAULT_PAGE_LIMIT, capped at MAX_PAGE_LIMIT)
+    /// * `owner`    – Address of the bill owner
+    /// * `currency` – Currency code to filter by, e.g. `"USDC"`, `"XLM"`
+    /// * `cursor`   – Start after this bill ID (pass 0 for the first page)
+    /// * `limit`    – Max items per page (0 → DEFAULT_PAGE_LIMIT, capped at MAX_PAGE_LIMIT)
     ///
     /// # Returns
     /// `BillPage { items, next_cursor, count }`. `next_cursor == 0` means no more pages.
+    ///
+    /// # Currency Comparison
+    /// Currency comparison is case-insensitive and whitespace-insensitive:
+    /// - "usdc", "USDC", "UsDc", " usdc " all match
+    /// - Empty currency defaults to "XLM" for comparison
+    ///
+    /// # Examples
+    /// ```rust
+    /// // Get all USDC bills for owner
+    /// let page = client.get_bills_by_currency(&owner, &"USDC".into(), &0, &10);
+    /// ```
     pub fn get_bills_by_currency(
         env: Env,
         owner: Address,
@@ -1253,6 +1350,7 @@ impl BillPayments {
         limit: u32,
     ) -> BillPage {
         let limit = Self::clamp_limit(limit);
+        let normalized_currency = Self::normalize_currency(&env, &currency);
         let bills: Map<u32, Bill> = env
             .storage()
             .instance()
@@ -1264,7 +1362,7 @@ impl BillPayments {
             if id <= cursor {
                 continue;
             }
-            if bill.owner != owner || bill.currency != currency {
+            if bill.owner != owner || bill.currency != normalized_currency {
                 continue;
             }
             staging.push_back((id, bill));
@@ -1278,7 +1376,25 @@ impl BillPayments {
 
     /// Get a page of **unpaid** bills for `owner` that match `currency`.
     ///
-    /// Same cursor/limit semantics as `get_bills_by_currency`.
+    /// # Arguments
+    /// * `owner`    – Address of the bill owner
+    /// * `currency` – Currency code to filter by, e.g. `"USDC"`, `"XLM"`
+    /// * `cursor`   – Start after this bill ID (pass 0 for the first page)
+    /// * `limit`    – Max items per page (0 → DEFAULT_PAGE_LIMIT, capped at MAX_PAGE_LIMIT)
+    ///
+    /// # Returns
+    /// `BillPage { items, next_cursor, count }`. `next_cursor == 0` means no more pages.
+    ///
+    /// # Currency Comparison
+    /// Currency comparison is case-insensitive and whitespace-insensitive:
+    /// - "usdc", "USDC", "UsDc", " usdc " all match
+    /// - Empty currency defaults to "XLM" for comparison
+    ///
+    /// # Examples
+    /// ```rust
+    /// // Get unpaid USDC bills for owner
+    /// let page = client.get_unpaid_bills_by_currency(&owner, &"USDC".into(), &0, &10);
+    /// ```
     pub fn get_unpaid_bills_by_currency(
         env: Env,
         owner: Address,
@@ -1287,6 +1403,7 @@ impl BillPayments {
         limit: u32,
     ) -> BillPage {
         let limit = Self::clamp_limit(limit);
+        let normalized_currency = Self::normalize_currency(&env, &currency);
         let bills: Map<u32, Bill> = env
             .storage()
             .instance()
@@ -1298,7 +1415,7 @@ impl BillPayments {
             if id <= cursor {
                 continue;
             }
-            if bill.owner != owner || bill.paid || bill.currency != currency {
+            if bill.owner != owner || bill.paid || bill.currency != normalized_currency {
                 continue;
             }
             staging.push_back((id, bill));
@@ -1312,11 +1429,27 @@ impl BillPayments {
 
     /// Sum of all **unpaid** bill amounts for `owner` denominated in `currency`.
     ///
-    /// # Example
-    /// ```text
-    /// let usdc_owed = client.get_total_unpaid_by_currency(&owner, &String::from_str(&env, "USDC"));
+    /// # Arguments
+    /// * `owner`    – Address of the bill owner
+    /// * `currency` – Currency code to filter by, e.g. `"USDC"`, `"XLM"`
+    ///
+    /// # Returns
+    /// Total unpaid amount in the specified currency
+    ///
+    /// # Currency Comparison
+    /// Currency comparison is case-insensitive and whitespace-insensitive:
+    /// - "usdc", "USDC", "UsDc", " usdc " all match
+    /// - Empty currency defaults to "XLM" for comparison
+    ///
+    /// # Examples
+    /// ```rust
+    /// // Get total unpaid amount in USDC
+    /// let total_usdc = client.get_total_unpaid_by_currency(&owner, &"USDC".into());
+    /// // Get total unpaid amount in XLM
+    /// let total_xlm = client.get_total_unpaid_by_currency(&owner, &"XLM".into());
     /// ```
     pub fn get_total_unpaid_by_currency(env: Env, owner: Address, currency: String) -> i128 {
+        let normalized_currency = Self::normalize_currency(&env, &currency);
         let bills: Map<u32, Bill> = env
             .storage()
             .instance()
@@ -1324,7 +1457,7 @@ impl BillPayments {
             .unwrap_or_else(|| Map::new(&env));
         let mut total = 0i128;
         for (_, bill) in bills.iter() {
-            if !bill.paid && bill.owner == owner && bill.currency == currency {
+            if !bill.paid && bill.owner == owner && bill.currency == normalized_currency {
                 total += bill.amount;
             }
         }
