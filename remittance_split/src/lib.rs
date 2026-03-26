@@ -413,7 +413,7 @@ impl RemittanceSplit {
             bills_percent,
             insurance_percent,
         };
-        owner.require_auth_for_args((payload,).into_val(&env));
+        owner.require_auth_for_args((payload,));
 
         Self::require_not_paused(&env)?;
         Self::require_nonce(&env, &owner, nonce)?;

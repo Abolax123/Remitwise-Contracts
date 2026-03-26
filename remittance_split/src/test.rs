@@ -5,7 +5,7 @@ use soroban_sdk::{
     testutils::{Address as AddressTrait, Events, Ledger},
     testutils::storage::Instance as StorageInstance,
     token::{StellarAssetClient, TokenClient},
-    Address, Env, Symbol, TryFromVal,
+    Address, Env, Symbol, TryFromVal, TryIntoVal,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ fn test_initialize_split_domain_separated_auth() {
     // The top-level invocation from mock_all_auths for require_auth_for_args
     // will have the authorized arguments.
     let payload_val = auth_invocation.args.get(0).unwrap();
-    let payload = InitializationPayload::try_from_val(&env, &payload_val).unwrap();
+    let payload: InitializationPayload = payload_val.try_into_val(&env).unwrap();
     
     assert_eq!(payload.domain, symbol_short!("init"));
     assert_eq!(payload.network, env.ledger().network_id());
