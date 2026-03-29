@@ -52,9 +52,10 @@ fn bench_get_total_unpaid_worst_case() {
             &owner,
             &name,
             &100i128,
-            &1_000_000u64, // Due date is 1,000,000
+            &1_000_000u64,
             &false,
             &0u32,
+            &None,
             &String::from_str(&env, "XLM"),
         );
     }

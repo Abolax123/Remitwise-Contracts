@@ -31,11 +31,12 @@ This section provides a minimal example of how to interact with the Bill Payment
 let bill_id = client.create_bill(
     &owner_address,
     &String::from_str(&env, "Internet Bill"),
-    &500_0000000,                           
-    &(env.ledger().timestamp() + 2592000), 
-    &false,                                
-    &0,                                     
-    &String::from_str(&env, "XLM")          
+    &500_0000000,
+    &(env.ledger().timestamp() + 2592000),
+    &false,
+    &0,
+    &None,
+    &String::from_str(&env, "XLM"),
 );
 
 ```
@@ -74,7 +75,8 @@ pub struct Bill {
 - `BillAlreadyPaid = 2`: Attempting to pay an already paid bill
 - `InvalidAmount = 3`: Amount is zero or negative
 - `InvalidFrequency = 4`: Recurring bill has zero frequency
-- `Unauthorized = 5`: Caller is not the bill owner
+- `Unauthorized = 5`: Caller is not the bill owner (or not the archived row owner where required)
+- `InconsistentBillData = 15`: Map key and embedded `id` disagree, or restore would collide with inconsistent active state (see Archive and restore)
 
 ### Functions
 
@@ -223,9 +225,51 @@ let bills_allocation = split_amounts.get(2).unwrap(); // bills percentage
 ### With Insurance Contract
 Bills can represent insurance premiums, working alongside the insurance contract for comprehensive financial management.
 
-## Security Considerations
+## Archive and restore (Issue #272)
 
-- All functions require proper authorization
-- Owners can only manage their own bills
-- Input validation prevents invalid states
-- Storage TTL is managed to prevent bloat
+Paid bills can be moved to **archived** storage, restored to active storage, or **cleaned up** (permanently removed from the archive). These flows enforce **owner affinity**: only the recorded bill owner can mutate or read sensitive archive data for their rows.
+
+### Functions
+
+| Function | Authorization | Notes |
+|----------|----------------|--------|
+| `archive_paid_bills(caller, before_timestamp)` | `caller.require_auth()` | Archives only rows where `bill.owner == caller`, `bill.paid`, `paid_at < before_timestamp`, and **map key `id` matches `bill.id`** (integrity). |
+| `restore_bill(caller, bill_id)` | `caller.require_auth()` | Requires archived row exists, `ArchivedBill.owner == caller`, **`ArchivedBill.id == bill_id`**, and no conflicting active bill at `bill_id`. |
+| `bulk_cleanup_bills(caller, before_timestamp)` | `caller.require_auth()` | Deletes only archived rows with `owner == caller`, `archived_at < before_timestamp`, and **`id` key matches `ArchivedBill.id`**. |
+| `get_archived_bills(owner, cursor, limit)` | **`owner.require_auth()`** | Listing is not anonymous; the `owner` address must sign. |
+| `get_archived_bill(caller, bill_id)` | **`caller.require_auth()`** | Returns `Ok(archived)` only if the archived row exists **and** `archived.owner == caller` and ids are consistent; otherwise `BillNotFound`, `Unauthorized`, or `InconsistentBillData`. |
+
+### Error code
+
+- **`InconsistentBillData = 15`**: Thrown when a stored `Bill` / `ArchivedBill` has an `id` field that does not match its map key, when restoring would collide with an existing active row for the same id, or when cleanup detects the same mismatch. This blocks silent cross-owner or corrupted-key exploitation.
+
+### NatSpec-style notes (contract source)
+
+The contract uses `@notice`, `@param`, `@return`, `@dev`, and `@errors` on archive-related entrypoints in `bill_payments/src/lib.rs` for reviewers and tooling.
+
+### Client migration
+
+- **`get_archived_bill`**: Signature is now `(env, caller, bill_id) -> Result<ArchivedBill, Error>` (previously a public `Option` by `bill_id` only). Callers must pass the **authenticated owner** as `caller`.
+
+## Security considerations
+
+- **Authorization**: Mutating functions use `require_auth()` on the acting address; archive listings require the **same** owner address to authorize reads.
+- **Owner affinity**: Archive, restore, and cleanup iterate or select rows **only** for `caller` / authenticated `owner`; cross-owner manipulation returns `Unauthorized` or fails integrity checks.
+- **Consistency**: Key/id checks reduce the risk of inconsistent maps being used to move or read another user’s data.
+- **Input validation**: Amounts, due dates, and recurrence rules are validated on create/update paths.
+- **Storage TTL**: Instance and archive TTL bumps keep data available without unbounded retention of abandoned state.
+
+### Validation (tests)
+
+Run from the workspace root:
+
+```bash
+cargo test -p bill_payments
+```
+
+All `bill_payments` unit tests, integration tests under `bill_payments/tests/`, and Issue #272 cases in `bill_payments/src/test.rs` should pass. Focused security tests cover: non-owner `get_archived_bill` / `restore_bill`, and `bulk_cleanup` not removing another owner’s archived rows.
+
+**Security assumptions**
+
+- Stellar account signatures are unforgeable; `require_auth()` correctly binds the caller to the intended `Address`.
+- Archive state is only produced through `archive_paid_bills` (paid bills, owner-checked); callers should treat `InconsistentBillData` as a fatal integrity signal and investigate off-chain.

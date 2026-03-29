@@ -13,22 +13,9 @@
 //! - No explicit caps are imposed by the contract, but overflow will panic
 
 use bill_payments::{BillPayments, BillPaymentsClient};
-use soroban_sdk::testutils::{Address as AddressTrait, Ledger, LedgerInfo};
+use soroban_sdk::testutils::Address as AddressTrait;
 use soroban_sdk::{Env, String};
-
-fn set_time(env: &Env, timestamp: u64) {
-    let proto = env.ledger().protocol_version();
-    env.ledger().set(LedgerInfo {
-        protocol_version: proto,
-        sequence_number: 1,
-        timestamp,
-        network_id: [0; 32],
-        base_reserve: 10,
-        min_temp_entry_ttl: 1,
-        min_persistent_entry_ttl: 1,
-        max_entry_ttl: 100000,
-    });
-}
+use testutils::set_ledger_time;
 
 #[test]
 fn test_create_bill_near_max_i128() {
@@ -43,14 +30,16 @@ fn test_create_bill_near_max_i128() {
     let large_amount = i128::MAX / 2;
 
     let bill_id = client.create_bill(
-        &owner,
-        &String::from_str(&env, "Large Bill"),
-        &large_amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Large Bill"),
+            &large_amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     let bill = client.get_bill(&bill_id).unwrap();
     assert_eq!(bill.amount, large_amount);
@@ -69,14 +58,16 @@ fn test_pay_bill_with_large_amount() {
     let large_amount = i128::MAX / 2;
 
     let bill_id = client.create_bill(
-        &owner,
-        &String::from_str(&env, "Large Bill"),
-        &large_amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Large Bill"),
+            &large_amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     env.mock_all_auths();
     client.pay_bill(&owner, &bill_id);
@@ -98,14 +89,16 @@ fn test_recurring_bill_with_large_amount() {
     let large_amount = i128::MAX / 2;
 
     let bill_id = client.create_bill(
-        &owner,
-        &String::from_str(&env, "Large Recurring"),
-        &large_amount,
-        &1000000,
-        &true,
-        &30,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Large Recurring"),
+            &large_amount,
+            &1000000,
+            &true,
+            &30,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     env.mock_all_auths();
     client.pay_bill(&owner, &bill_id);
@@ -134,25 +127,29 @@ fn test_get_total_unpaid_with_two_large_bills() {
     let amount = i128::MAX / 4;
 
     client.create_bill(
-        &owner,
-        &String::from_str(&env, "Bill1"),
-        &amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Bill1"),
+            &amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     env.mock_all_auths();
     client.create_bill(
-        &owner,
-        &String::from_str(&env, "Bill2"),
-        &amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Bill2"),
+            &amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     let total = client.get_total_unpaid(&owner);
     assert_eq!(total, amount + amount);
@@ -172,25 +169,29 @@ fn test_get_total_unpaid_overflow_panics() {
     let amount = i128::MAX / 2 + 1000;
 
     client.create_bill(
-        &owner,
-        &String::from_str(&env, "Bill1"),
-        &amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Bill1"),
+            &amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     env.mock_all_auths();
     client.create_bill(
-        &owner,
-        &String::from_str(&env, "Bill2"),
-        &amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Bill2"),
+            &amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     // This should panic due to overflow
     client.get_total_unpaid(&owner);
@@ -210,25 +211,29 @@ fn test_multiple_large_bills_different_owners() {
 
     // Each owner can have large bills independently
     client.create_bill(
-        &owner1,
-        &String::from_str(&env, "Owner1 Bill"),
-        &large_amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner1,
+            &String::from_str(&env,
+            "Owner1 Bill"),
+            &large_amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     env.mock_all_auths();
     client.create_bill(
-        &owner2,
-        &String::from_str(&env, "Owner2 Bill"),
-        &large_amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner2,
+            &String::from_str(&env,
+            "Owner2 Bill"),
+            &large_amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     let total1 = client.get_total_unpaid(&owner1);
     let total2 = client.get_total_unpaid(&owner2);
@@ -240,7 +245,7 @@ fn test_multiple_large_bills_different_owners() {
 #[test]
 fn test_archive_large_amount_bill() {
     let env = Env::default();
-    set_time(&env, 1000000);
+    set_ledger_time(&env, 1, 1000000);
 
     let contract_id = env.register_contract(None, BillPayments);
     let client = BillPaymentsClient::new(&env, &contract_id);
@@ -251,14 +256,16 @@ fn test_archive_large_amount_bill() {
     let large_amount = i128::MAX / 2;
 
     let bill_id = client.create_bill(
-        &owner,
-        &String::from_str(&env, "Large Bill"),
-        &large_amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Large Bill"),
+            &large_amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     env.mock_all_auths();
     client.pay_bill(&owner, &bill_id);
@@ -267,7 +274,7 @@ fn test_archive_large_amount_bill() {
     let before_timestamp: u64 = 2_000_000;
     client.archive_paid_bills(&owner, &before_timestamp);
 
-    let archived = client.get_archived_bill(&bill_id).unwrap();
+    let archived = client.get_archived_bill(&owner, &bill_id);
     assert_eq!(archived.amount, large_amount);
 }
 
@@ -287,12 +294,16 @@ fn test_batch_pay_large_bills() {
     for i in 0..5 {
         let bill_id = client.create_bill(
             &owner,
-            &String::from_str(&env, &format!("Bill{}", i)),
+            &String::from_str(&env,
+            &format!("Bill{}",
+            i)),
             &amount,
             &1000000,
             &false,
             &0,
-            &String::from_str(&env, "XLM"),
+            &None,
+            &String::from_str(&env,
+            "XLM")
         );
         bill_ids.push_back(bill_id);
         env.mock_all_auths();
@@ -311,34 +322,6 @@ fn test_batch_pay_large_bills() {
     }
 }
 
-// #[test]
-// fn test_overdue_bills_with_large_amounts() {
-//     let env = Env::default();
-//     set_time(&env, 2_000_000);
-
-//     let contract_id = env.register_contract(None, BillPayments);
-//     let client = BillPaymentsClient::new(&env, &contract_id);
-//     let owner = <soroban_sdk::Address as AddressTrait>::generate(&env);
-
-//     env.mock_all_auths();
-
-//     let large_amount = i128::MAX / 2;
-
-//     client.create_bill(
-//         &owner,
-//         &String::from_str(&env, "Overdue Large"),
-//         &large_amount,
-//         &1000000, // Past due
-//         &false,
-//         &0,
-//         &String::from_str(&env, "XLM"),
-//     );
-
-//     let page = client.get_overdue_bills(&0, &10);
-//     assert_eq!(page.count, 1);
-//     assert_eq!(page.items.get(0).unwrap().amount, large_amount);
-// }
-
 #[test]
 fn test_edge_case_i128_max_minus_one() {
     let env = Env::default();
@@ -352,14 +335,16 @@ fn test_edge_case_i128_max_minus_one() {
     let edge_amount = i128::MAX - 1;
 
     let bill_id = client.create_bill(
-        &owner,
-        &String::from_str(&env, "Edge Case"),
-        &edge_amount,
-        &1000000,
-        &false,
-        &0,
-        &String::from_str(&env, "XLM"),
-    );
+            &owner,
+            &String::from_str(&env,
+            "Edge Case"),
+            &edge_amount,
+            &1000000,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM")
+        );
 
     let bill = client.get_bill(&bill_id).unwrap();
     assert_eq!(bill.amount, edge_amount);
@@ -380,12 +365,16 @@ fn test_pagination_with_large_amounts() {
     for i in 0..15 {
         client.create_bill(
             &owner,
-            &String::from_str(&env, &format!("Bill{}", i)),
+            &String::from_str(&env,
+            &format!("Bill{}",
+            i)),
             &large_amount,
             &1000000,
             &false,
             &0,
-            &String::from_str(&env, "XLM"),
+            &None,
+            &String::from_str(&env,
+            "XLM")
         );
         env.mock_all_auths();
     }

@@ -75,10 +75,12 @@ pub enum Error {
     InvalidDueDate = 12,
     InvalidTag = 13,
     EmptyTags = 14,
+    /// Storage key and embedded `Bill::id` / `ArchivedBill::id` do not match (integrity check).
+    InconsistentBillData = 15,
 }
 
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArchivedBill {
     pub id: u32,
     pub owner: Address,
@@ -797,13 +799,15 @@ impl BillPayments {
     // Archived bill queries (paginated)
     // -----------------------------------------------------------------------
 
-    /// Get a page of archived bills for `owner`.
+    /// @notice Paginated archived bills for the authenticated `owner`.
+    /// @dev `owner` must call `require_auth()` so listings cannot be scraped for arbitrary addresses.
     pub fn get_archived_bills(
         env: Env,
         owner: Address,
         cursor: u32,
         limit: u32,
     ) -> ArchivedBillPage {
+        owner.require_auth();
         let limit = clamp_limit(limit);
         let archived: Map<u32, ArchivedBill> = env
             .storage()
@@ -853,13 +857,29 @@ impl BillPayments {
         }
     }
 
-    pub fn get_archived_bill(env: Env, bill_id: u32) -> Option<ArchivedBill> {
+    /// @notice Fetch one archived bill by id for an authenticated owner.
+    /// @param caller Must authorize and must equal `ArchivedBill.owner`.
+    /// @return `Ok(archived)` when found and owned by `caller`.
+    /// @errors `BillNotFound`, `Unauthorized`, `InconsistentBillData`
+    pub fn get_archived_bill(
+        env: Env,
+        caller: Address,
+        bill_id: u32,
+    ) -> Result<ArchivedBill, Error> {
+        caller.require_auth();
         let archived: Map<u32, ArchivedBill> = env
             .storage()
             .instance()
             .get(&symbol_short!("ARCH_BILL"))
             .unwrap_or_else(|| Map::new(&env));
-        archived.get(bill_id)
+        let ab = archived.get(bill_id).ok_or(Error::BillNotFound)?;
+        if ab.owner != caller {
+            return Err(Error::Unauthorized);
+        }
+        if ab.id != bill_id {
+            return Err(Error::InconsistentBillData);
+        }
+        Ok(ab)
     }
 
     // -----------------------------------------------------------------------
@@ -896,6 +916,8 @@ impl BillPayments {
         Ok(())
     }
 
+    /// @notice Move paid bills owned by `caller` into the archive store before `before_timestamp`.
+    /// @dev Enforces `bill.owner == caller`, `bill.id ==` map key, and paid invariants before archiving.
     pub fn archive_paid_bills(
         env: Env,
         caller: Address,
@@ -921,6 +943,12 @@ impl BillPayments {
         let mut to_remove: Vec<u32> = Vec::new(&env);
 
         for (id, bill) in bills.iter() {
+            if bill.owner != caller {
+                continue;
+            }
+            if bill.id != id {
+                return Err(Error::InconsistentBillData);
+            }
             if let Some(paid_at) = bill.paid_at {
                 if bill.paid && paid_at < before_timestamp {
                     let archived_bill = ArchivedBill {
@@ -964,6 +992,8 @@ impl BillPayments {
         Ok(archived_count)
     }
 
+    /// @notice Restore an archived bill into active storage for its owner.
+    /// @dev Confirms archive owner and id/key consistency; refuses if an active bill already occupies `bill_id`.
     pub fn restore_bill(env: Env, caller: Address, bill_id: u32) -> Result<(), Error> {
         caller.require_auth();
         Self::require_not_paused(&env, pause_functions::RESTORE)?;
@@ -979,12 +1009,22 @@ impl BillPayments {
         if archived_bill.owner != caller {
             return Err(Error::Unauthorized);
         }
+        if archived_bill.id != bill_id {
+            return Err(Error::InconsistentBillData);
+        }
 
         let mut bills: Map<u32, Bill> = env
             .storage()
             .instance()
             .get(&symbol_short!("BILLS"))
             .unwrap_or_else(|| Map::new(&env));
+
+        if let Some(existing) = bills.get(bill_id) {
+            if existing.owner != archived_bill.owner {
+                return Err(Error::Unauthorized);
+            }
+            return Err(Error::InconsistentBillData);
+        }
 
         let restored_bill = Bill {
             id: archived_bill.id,
@@ -1025,6 +1065,8 @@ impl BillPayments {
         Ok(())
     }
 
+    /// @notice Permanently remove archived rows owned by `caller` older than `before_timestamp`.
+    /// @dev Skips rows where `ArchivedBill.id` does not match the map key (returns `InconsistentBillData`).
     pub fn bulk_cleanup_bills(
         env: Env,
         caller: Address,
@@ -1043,6 +1085,12 @@ impl BillPayments {
         let mut to_remove: Vec<u32> = Vec::new(&env);
 
         for (id, bill) in archived.iter() {
+            if bill.owner != caller {
+                continue;
+            }
+            if bill.id != id {
+                return Err(Error::InconsistentBillData);
+            }
             if bill.archived_at < before_timestamp {
                 to_remove.push_back(id);
                 deleted_count += 1;
@@ -1380,6 +1428,7 @@ impl BillPayments {
 #[cfg(test)]
 mod test {
     use super::*;
+    use remitwise_common::MAX_PAGE_LIMIT;
     use proptest::prelude::*;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
@@ -1407,6 +1456,7 @@ mod test {
                 &(env.ledger().timestamp() + 86400 * (i as u64 + 1)),
                 &false,
                 &0,
+                &None,
                 &String::from_str(env, "XLM"),
             );
             ids.push_back(id);
@@ -1641,6 +1691,7 @@ mod test {
                 &(env.ledger().timestamp() + 86400 * (i as u64 + 1)),
                 &false,
                 &0,
+                &None,
                 &String::from_str(&env, "XLM"),
             );
             client.create_bill(
@@ -1650,6 +1701,7 @@ mod test {
                 &(env.ledger().timestamp() + 86400 * (i as u64 + 1)),
                 &false,
                 &0,
+                &None,
                 &String::from_str(&env, "XLM"),
             );
         }
@@ -1723,6 +1775,7 @@ mod test {
                 &due_date, // 20000
                 &false,
                 &0,
+                &None,
                 &String::from_str(&env, "XLM"),
             );
         }
@@ -1839,6 +1892,7 @@ mod test {
             &base_due_date,
             &true, // recurring
             &1,    // frequency_days = 1
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -1873,6 +1927,7 @@ mod test {
             &base_due_date,
             &true, // recurring
             &30,   // frequency_days = 30
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -1910,6 +1965,7 @@ mod test {
             &base_due_date,
             &true, // recurring
             &365,  // frequency_days = 365
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -1951,6 +2007,7 @@ mod test {
             &base_due_date,
             &true,
             &30,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -1982,6 +2039,7 @@ mod test {
             &base_due_date,
             &true, // recurring
             &30,   // frequency_days = 30
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2031,6 +2089,7 @@ mod test {
             &base_due_date,
             &true, // recurring
             &30,   // frequency_days = 30
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2077,6 +2136,7 @@ mod test {
             &base_due_date,
             &true, // recurring
             &30,   // frequency_days = 30
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2115,6 +2175,7 @@ mod test {
             &1_000_000,
             &true,
             &frequency,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2151,6 +2212,7 @@ mod test {
             &1_000_000,
             &true,
             &30,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2186,6 +2248,7 @@ mod test {
             &1_000_000,
             &true,
             &30,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2226,6 +2289,7 @@ mod test {
             &base_due,
             &true,
             &freq,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2251,13 +2315,15 @@ mod test {
             n_future in 0usize..6usize,
         ) {
             let env = make_env();
-            env.ledger().set_timestamp(now);
+            // Bills must be created with due_date >= ledger time; advance ledger before querying overdue.
+            let t_create = now.saturating_sub(500_000);
+            env.ledger().set_timestamp(t_create);
             env.mock_all_auths();
             let cid = env.register_contract(None, BillPayments);
             let client = BillPaymentsClient::new(&env, &cid);
             let owner = Address::generate(&env);
 
-            // Create bills with due_date < now (overdue)
+            // Create bills that will be overdue once ledger == `now` (due < now, due > t_create).
             for i in 0..n_overdue {
                 client.create_bill(
                     &owner,
@@ -2266,11 +2332,12 @@ mod test {
                     &(now - 1 - i as u64),
                     &false,
                     &0,
+                    &None,
                     &String::from_str(&env, "XLM"),
                 );
             }
 
-            // Create bills with due_date >= now (not overdue)
+            // Not overdue at query time `now`: due_date >= now
             for i in 0..n_future {
                 client.create_bill(
                     &owner,
@@ -2279,10 +2346,12 @@ mod test {
                     &(now + 1 + i as u64),
                     &false,
                     &0,
+                    &None,
                     &String::from_str(&env, "XLM"),
                 );
             }
 
+            env.ledger().set_timestamp(now);
             let page = client.get_overdue_bills(&0, &50);
             for bill in page.items.iter() {
                 prop_assert!(bill.due_date < now, "returned bill must be past due");
@@ -2313,6 +2382,7 @@ mod test {
                     &(now + i as u64), // due_date >= now — strict less-than is required to be overdue
                     &false,
                     &0,
+                    &None,
                     &String::from_str(&env, "XLM"),
                 );
             }
@@ -2338,7 +2408,7 @@ mod test {
         ) {
             let env = make_env();
             let pay_time = base_due + pay_offset;
-            env.ledger().set_timestamp(pay_time);
+            env.ledger().set_timestamp(base_due);
             env.mock_all_auths();
             let cid = env.register_contract(None, BillPayments);
             let client = BillPaymentsClient::new(&env, &cid);
@@ -2351,9 +2421,11 @@ mod test {
                 &base_due,
                 &true,
                 &freq_days,
+                &None,
                 &String::from_str(&env, "XLM"),
             );
 
+            env.ledger().set_timestamp(pay_time);
             client.pay_bill(&owner, &bill_id);
 
             let next_bill = client.get_bill(&2).unwrap();
@@ -2395,11 +2467,27 @@ mod test {
 
         // 3. Execution: Attempt to create bills with invalid dates
         // Added '&currency' as the final argument to both calls
-        let result_past =
-            client.try_create_bill(&owner, &name, &1000, &past_due_date, &false, &0, &currency);
+        let result_past = client.try_create_bill(
+            &owner,
+            &name,
+            &1000,
+            &past_due_date,
+            &false,
+            &0,
+            &None,
+            &currency,
+        );
 
-        let result_zero =
-            client.try_create_bill(&owner, &name, &1000, &zero_due_date, &false, &0, &currency);
+        let result_zero = client.try_create_bill(
+            &owner,
+            &name,
+            &1000,
+            &zero_due_date,
+            &false,
+            &0,
+            &None,
+            &currency,
+        );
 
         // 4. Assertions
         assert!(
@@ -2451,6 +2539,7 @@ mod test {
             &due_date,
             &false,
             &0,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2480,6 +2569,7 @@ mod test {
             &due_date,
             &false,
             &0,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2515,6 +2605,7 @@ mod test {
             &overdue_target,
             &false,
             &0,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2527,6 +2618,7 @@ mod test {
             &due_now_target,
             &false,
             &0,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2561,6 +2653,7 @@ mod test {
             &due_date,
             &false,
             &0,
+            &None,
             &String::from_str(&env, "XLM"),
         );
 
@@ -2575,3 +2668,7 @@ mod test {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "test.rs"]
+mod archive_restore_issue_272_tests;

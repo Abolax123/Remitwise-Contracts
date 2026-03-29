@@ -20,14 +20,15 @@ fn test_notification_flow() {
 
     // Create Bill
     let bill_id = client.create_bill(
-        &user,
-        &soroban_sdk::String::from_str(&e, "Electricity"),
-        &1000,
-        &1234567890,
-        &false,
-        &0,
-        &soroban_sdk::String::from_str(&e, "XLM"),
-    );
+            &user,
+            &soroban_sdk::String::from_str(&e, "Electricity"),
+            &1000,
+            &1234567890,
+            &false,
+            &0u32,
+            &None,
+            &soroban_sdk::String::from_str(&e, "XLM")
+        );
 
     // VERIFY: Get Events
     let all_events = e.events().all();
