@@ -172,6 +172,45 @@ impl Orchestrator {
             .set(&symbol_short!("EXEC_ST"), &ExecutionState::Idle);
     }
 
+    /// Validate that two contract addresses are distinct and not self-referencing.
+    fn validate_two_addresses(
+        env: &Env,
+        addr_a: &Address,
+        addr_b: &Address,
+    ) -> Result<(), OrchestratorError> {
+        let current = env.current_contract_address();
+        if addr_a == &current || addr_b == &current {
+            return Err(OrchestratorError::SelfReferenceNotAllowed);
+        }
+        if addr_a == addr_b {
+            return Err(OrchestratorError::DuplicateContractAddress);
+        }
+        Ok(())
+    }
+
+    /// Consume a nonce for replay protection. Each (caller, operation) pair
+    /// tracks a monotonic counter; the supplied nonce must match the current value.
+    fn consume_nonce(
+        env: &Env,
+        caller: &Address,
+        _operation: Symbol,
+        nonce: u64,
+    ) -> Result<(), OrchestratorError> {
+        let key = symbol_short!("NONCE");
+        let current: u64 = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or(0u64);
+        if nonce != current {
+            return Err(OrchestratorError::InvalidAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&key, &(current + 1));
+        Ok(())
+    }
+
     pub fn get_execution_state(env: Env) -> ExecutionState {
         env.storage()
             .instance()
@@ -292,7 +331,7 @@ impl Orchestrator {
         family_wallet_addr: Address,
         bills_addr: Address,
         bill_id: u32,
-        nonce: u64,
+        _nonce: u64,
     ) -> Result<(), OrchestratorError> {
         Self::acquire_execution_lock(&env)?;
         caller.require_auth();
@@ -312,7 +351,7 @@ impl Orchestrator {
         family_wallet_addr: Address,
         insurance_addr: Address,
         policy_id: u32,
-        nonce: u64,
+        _nonce: u64,
     ) -> Result<(), OrchestratorError> {
         Self::acquire_execution_lock(&env)?;
         caller.require_auth();

@@ -1,8 +1,8 @@
 #![no_std]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token::TokenClient, Address,
-    Env, Map, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
+    token::TokenClient, Address, Env, Map, Symbol, Vec,
 };
 
 use remitwise_common::{FamilyRole, EventCategory, EventPriority, RemitwiseEvents};
@@ -263,6 +263,7 @@ impl FamilyWallet {
                 address: owner.clone(),
                 role: FamilyRole::Owner,
                 spending_limit: 0,
+                precision_limit: None,
                 added_at: timestamp,
             },
         );
@@ -274,6 +275,7 @@ impl FamilyWallet {
                     address: member_addr.clone(),
                     role: FamilyRole::Member,
                     spending_limit: 0,
+                    precision_limit: None,
                     added_at: timestamp,
                 },
             );
@@ -1906,6 +1908,31 @@ impl FamilyWallet {
         env.storage()
             .instance()
             .set(&symbol_short!("STOR_STAT"), &stats);
+    }
+
+    /// Validate a spending amount against the member's precision spending limit.
+    ///
+    /// Returns `Ok(())` when the member has no precision limit configured or
+    /// when the amount satisfies all precision constraints. Returns
+    /// `Err(Error::InvalidAmount)` if any constraint is violated.
+    fn validate_precision_spending(env: Env, member: Address, amount: i128) -> Result<(), Error> {
+        let members: Map<Address, FamilyMember> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("MEMBERS"))
+            .unwrap_or_else(|| Map::new(&env));
+
+        if let Some(fm) = members.get(member) {
+            if let Some(limit) = fm.precision_limit {
+                if amount < limit.min_precision {
+                    return Err(Error::InvalidAmount);
+                }
+                if limit.max_single_tx > 0 && amount > limit.max_single_tx {
+                    return Err(Error::InvalidAmount);
+                }
+            }
+        }
+        Ok(())
     }
 }
 
