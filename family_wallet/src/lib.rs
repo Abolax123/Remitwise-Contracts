@@ -17,7 +17,6 @@ const ARCHIVE_BUMP_AMOUNT: u32 = 2592000;
 
 // Signature expiration time constants
 const DEFAULT_PROPOSAL_EXPIRY: u64 = 86400; // 24 hours
-const MAX_PROPOSAL_EXPIRY: u64 = 604800; // 7 days
 
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]

@@ -619,7 +619,6 @@ impl SavingsGoalContract {
     ///   goals should validate this before invoking the contract.
     ///
     /// # Events
-    /// - Emits `GOAL_CREATED` with goal details.
     /// - Emits `SavingsEvent::GoalCreated`.
     pub fn create_goal(
         env: Env,
