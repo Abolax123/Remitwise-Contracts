@@ -1,17 +1,16 @@
 #![no_std]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
-extern crate alloc;
-
 use remitwise_common::{
     clamp_limit, EventCategory, EventPriority, RemitwiseEvents, ARCHIVE_BUMP_AMOUNT,
     ARCHIVE_LIFETIME_THRESHOLD, CONTRACT_VERSION, INSTANCE_BUMP_AMOUNT,
-    INSTANCE_LIFETIME_THRESHOLD, MAX_BATCH_SIZE, MAX_PAGE_LIMIT,
+    INSTANCE_LIFETIME_THRESHOLD, MAX_BATCH_SIZE,
 };
 #[cfg(test)]
-use remitwise_common::MAX_PAGE_LIMIT;
+use remitwise_common::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT};
+    INSTANCE_LIFETIME_THRESHOLD, MAX_BATCH_SIZE, MAX_PAGE_LIMIT,
+};
 
-use alloc::vec::Vec as StdVec;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, String,
     Symbol, Vec,
@@ -60,6 +59,8 @@ pub mod pause_functions {
 }
 
 const STORAGE_UNPAID_TOTALS: Symbol = symbol_short!("UNPD_TOT");
+const MAX_FREQUENCY_DAYS: u32 = 36_500;
+const SECONDS_PER_DAY: u64 = 86_400;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -115,6 +116,7 @@ pub enum BillEvent {
     ExternalRefUpdated,
 }
 
+#[derive(Clone, Debug)]
 #[contracttype]
 #[derive(Clone)]
 pub struct StorageStats {
@@ -816,7 +818,7 @@ impl BillPayments {
     }
 
     /// Admin-only: get ALL bills (any owner), paginated.
-    pub fn get_all_bills(
+    pub fn get_all_bills_page(
         env: Env,
         caller: Address,
         cursor: u32,
@@ -936,6 +938,25 @@ impl BillPayments {
     ///
     /// # Returns
     /// Vec of all Bill structs
+    pub fn get_all_bills(env: Env, caller: Address) -> Result<Vec<Bill>, Error> {
+        caller.require_auth();
+        let admin = Self::get_pause_admin(&env).ok_or(Error::Unauthorized)?;
+        if admin != caller {
+            return Err(Error::Unauthorized);
+        }
+
+        let bills: Map<u32, Bill> = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("BILLS"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut result = Vec::new(&env);
+        for (_, bill) in bills.iter() {
+            result.push_back(bill);
+        }
+        Ok(result)
+    }
+
     // -----------------------------------------------------------------------
     // Backward-compat helpers
     // -----------------------------------------------------------------------
@@ -1157,8 +1178,8 @@ impl BillPayments {
             owner: archived_bill.owner.clone(),
             name: archived_bill.name.clone(),
             external_ref: None,
+            external_ref: archived_bill.external_ref.clone(),
             amount: archived_bill.amount,
-            external_ref: None,
             due_date: env.ledger().timestamp() + 2592000,
             recurring: false,
             frequency_days: 0,
@@ -1688,6 +1709,7 @@ mod test {
                 &false,
                 &0,
                 &None,
+
                 &String::from_str(env, "XLM"),
             );
             ids.push_back(id);
@@ -1923,6 +1945,7 @@ mod test {
                 &false,
                 &0,
                 &None,
+
                 &String::from_str(&env, "XLM"),
             );
             client.create_bill(
@@ -1933,6 +1956,7 @@ mod test {
                 &false,
                 &0,
                 &None,
+
                 &String::from_str(&env, "XLM"),
             );
         }
@@ -2007,6 +2031,7 @@ mod test {
                 &false,
                 &0,
                 &None,
+
                 &String::from_str(&env, "XLM"),
             );
         }
@@ -2124,6 +2149,7 @@ mod test {
             &true, // recurring
             &1,    // frequency_days = 1
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2159,6 +2185,7 @@ mod test {
             &true, // recurring
             &30,   // frequency_days = 30
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2197,6 +2224,7 @@ mod test {
             &true, // recurring
             &365,  // frequency_days = 365
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2239,6 +2267,7 @@ mod test {
             &true,
             &30,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2271,6 +2300,7 @@ mod test {
             &true, // recurring
             &30,   // frequency_days = 30
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2321,6 +2351,7 @@ mod test {
             &true, // recurring
             &30,   // frequency_days = 30
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2368,6 +2399,7 @@ mod test {
             &true, // recurring
             &30,   // frequency_days = 30
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2407,6 +2439,7 @@ mod test {
             &true,
             &frequency,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2444,6 +2477,7 @@ mod test {
             &true,
             &30,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2480,6 +2514,7 @@ mod test {
             &true,
             &30,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2521,6 +2556,7 @@ mod test {
             &true,
             &freq,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2567,6 +2603,7 @@ mod test {
                     &false,
                     &0,
                     &None,
+
                     &String::from_str(&env, "XLM"),
                 );
             }
@@ -2581,6 +2618,7 @@ mod test {
                     &false,
                     &0,
                     &None,
+
                     &String::from_str(&env, "XLM"),
                 );
             }
@@ -2619,6 +2657,7 @@ mod test {
                     &false,
                     &0,
                     &None,
+
                     &String::from_str(&env, "XLM"),
                 );
             }
@@ -2661,6 +2700,7 @@ mod test {
                 &true,
                 &freq_days,
                 &None,
+
                 &String::from_str(&env, "XLM"),
             );
 
@@ -2766,6 +2806,7 @@ mod test {
             &false,
             &0,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2796,6 +2837,7 @@ mod test {
             &false,
             &0,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2832,6 +2874,7 @@ mod test {
             &false,
             &0,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2845,6 +2888,7 @@ mod test {
             &false,
             &0,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
@@ -2880,6 +2924,7 @@ mod test {
             &false,
             &0,
             &None,
+
             &String::from_str(&env, "XLM"),
         );
 
