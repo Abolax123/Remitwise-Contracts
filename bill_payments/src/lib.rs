@@ -16,6 +16,9 @@ use soroban_sdk::{
     Symbol, Vec,
 };
 
+const MAX_FREQUENCY_DAYS: u32 = 36500; // 100 years
+const SECONDS_PER_DAY: u64 = 86400;
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct Bill {
